@@ -1,0 +1,65 @@
+/* Fallback values that match DEFAULT_SETTINGS in main.js */
+:root {
+	--cursor-width: 2px;
+	--cursor-color-dark: #00bfff;
+	--cursor-color-light: #00bfff;
+	--cursor-blink-name: cm-cursor-blink;
+}
+
+/* Hide the native browser caret; CodeMirror renders its own cursor divs */
+.markdown-source-view.mod-cm6 .cm-content {
+	caret-color: transparent;
+}
+
+/* Blink keyframes */
+@keyframes cm-cursor-blink {
+	0%,
+	40% {
+		opacity: 0;
+	}
+	80%,
+	100% {
+		opacity: 1;
+	}
+}
+
+/* Apply blink animation when cm-blinkLayer is present (cursor idle) */
+.cm-editor.cm-focused > .cm-scroller > .cm-cursorLayer.cm-blinkLayer,
+.cm-editor > .cm-scroller > .cm-cursorLayer.cm-overTableCell.cm-blinkLayer {
+	animation-name: var(--cursor-blink-name) !important;
+	animation-duration: 500ms !important;
+	animation-timing-function: ease-in-out;
+	animation-direction: alternate-reverse;
+	animation-iteration-count: infinite;
+}
+
+/* No animation while typing (blinkLayer is absent) */
+.cm-editor.cm-focused > .cm-scroller > .cm-cursorLayer:not(.cm-blinkLayer) {
+	animation: none !important;
+}
+
+/* Hide the duplicate cursor rendered inside table cell wrappers */
+.table-cell-wrapper .cm-cursorLayer {
+	display: none;
+}
+
+/* Cursor element — width only; color is theme-dependent below */
+.cm-editor .cm-cursor {
+	border-left-width: var(--cursor-width) !important;
+}
+
+/* Dark mode color */
+.theme-dark .cm-editor .cm-cursor {
+	border-left-color: var(--cursor-color-dark) !important;
+}
+
+/* Light mode color */
+.theme-light .cm-editor .cm-cursor {
+	border-left-color: var(--cursor-color-light) !important;
+}
+
+/* Keep cursor visible when pointing at or focused inside a table cell */
+.cm-cursorLayer.cm-overTableCell .cm-cursor,
+.cm-hasTablePointed .cm-cursorLayer .cm-cursor {
+	display: block;
+}

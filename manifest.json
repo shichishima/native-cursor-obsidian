@@ -1,0 +1,9 @@
+{
+  "id": "native-cursor",
+  "name": "Native Cursor",
+  "version": "1.0.0",
+  "minAppVersion": "1.4.0",
+  "description": "Wider cursor with a native feel; custom light/dark mode colour, width, and blink toggle.",
+  "author": "@olivertedwards",
+  "isDesktopOnly": false
+}
