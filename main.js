@@ -194,10 +194,29 @@ var CursorWidget = (function () {
 		// half_leading = (lineHeight - glyphHeight) / 2 shifts cursor top up
 		// to the CSS line-box top, which is where the selection highlight starts.
 		// On other platforms coords.top is already at the line-box top.
-		var top = coords.top - origin.top;
+		var glyphTop = coords.top - origin.top;
+		var glyphBottom = coords.bottom - origin.top;
+		var glyphHeight = glyphBottom - glyphTop;
+		var leading = lineHeight - glyphHeight;
+		var top = glyphTop;
 		if (obsidian.Platform.isMacOS) {
-			top -= (lineHeight - (coords.bottom - coords.top)) / 2;
+			top -= leading / 2;
 		}
+		var selBg = view.dom.querySelector(".cm-selectionBackground");
+		var selTop = selBg ? selBg.getBoundingClientRect().top - origin.top : null;
+		var selHeight = selBg ? selBg.getBoundingClientRect().height : null;
+		console.log("[cursor-debug]",
+			"platform:", JSON.stringify({ isMacOS: obsidian.Platform.isMacOS, isWin: obsidian.Platform.isWin }),
+			"| glyphTop:", glyphTop,
+			"| glyphBottom:", glyphBottom,
+			"| glyphHeight:", glyphHeight,
+			"| lineHeight:", lineHeight,
+			"| leading:", leading,
+			"| cursorTop:", top,
+			"| selTop:", selTop,
+			"| selHeight:", selHeight,
+			"| selTop-cursorTop:", selTop != null ? selTop - top : "n/a",
+		);
 		return new CursorWidget(
 			className,
 			coords.left - origin.left,
