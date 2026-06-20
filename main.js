@@ -198,7 +198,12 @@ var CursorWidget = (function () {
 		if (obsidian.Platform.isMacOS) {
 			top -= (lineHeight - (coords.bottom - coords.top)) / 2;
 		}
-		return new CursorWidget(className, coords.left - origin.left, top, lineHeight);
+		return new CursorWidget(
+			className,
+			coords.left - origin.left,
+			top,
+			lineHeight,
+		);
 	};
 
 	CursorWidget.forTableCellRange = function (
@@ -215,7 +220,12 @@ var CursorWidget = (function () {
 		if (obsidian.Platform.isMacOS) {
 			top -= (lineHeight - (coords.bottom - coords.top)) / 2;
 		}
-		return new CursorWidget(className, coords.left - origin.left, top, lineHeight);
+		return new CursorWidget(
+			className,
+			coords.left - origin.left,
+			top,
+			lineHeight,
+		);
 	};
 
 	return CursorWidget;
