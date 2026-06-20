@@ -109,6 +109,16 @@ var tableCellViewPlugin = codemirrorView.ViewPlugin.define(function (view) {
  * === Coordinate helper ===
  */
 
+function lineHeightAt(view, pos) {
+	try {
+		var node = view.domAtPos(pos).node;
+		if (node.nodeType === 3) node = node.parentElement;
+		var h = parseFloat(getComputedStyle(node).lineHeight);
+		if (h > 0) return h;
+	} catch (e) {}
+	return view.defaultLineHeight;
+}
+
 function getScrollOrigin(view) {
 	var rect = view.scrollDOM.getBoundingClientRect();
 	var left =
@@ -179,12 +189,16 @@ var CursorWidget = (function () {
 		var coords = view.coordsAtPos(range.head, range.assoc || 1);
 		if (!coords) return null;
 		var origin = getScrollOrigin(view);
-		return new CursorWidget(
-			className,
-			coords.left - origin.left,
-			coords.top - origin.top,
-			coords.bottom - coords.top,
-		);
+		var lineHeight = lineHeightAt(view, range.head);
+		// On macOS, CoreText reports full glyph bounds (including descenders).
+		// half_leading = (lineHeight - glyphHeight) / 2 shifts cursor top up
+		// to the CSS line-box top, which is where the selection highlight starts.
+		// On other platforms coords.top is already at the line-box top.
+		var top = coords.top - origin.top;
+		if (obsidian.Platform.isMacOS) {
+			top -= (lineHeight - (coords.bottom - coords.top)) / 2;
+		}
+		return new CursorWidget(className, coords.left - origin.left, top, lineHeight);
 	};
 
 	CursorWidget.forTableCellRange = function (
@@ -196,12 +210,12 @@ var CursorWidget = (function () {
 		var coords = activeView.coordsAtPos(range.head, range.assoc || 1);
 		if (!coords) return null;
 		var origin = getScrollOrigin(hostView);
-		return new CursorWidget(
-			className,
-			coords.left - origin.left,
-			coords.top - origin.top,
-			coords.bottom - coords.top,
-		);
+		var lineHeight = lineHeightAt(activeView, range.head);
+		var top = coords.top - origin.top;
+		if (obsidian.Platform.isMacOS) {
+			top -= (lineHeight - (coords.bottom - coords.top)) / 2;
+		}
+		return new CursorWidget(className, coords.left - origin.left, top, lineHeight);
 	};
 
 	return CursorWidget;
