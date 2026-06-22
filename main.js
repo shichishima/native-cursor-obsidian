@@ -191,25 +191,8 @@ var CursorWidget = (function () {
 		var origin = getScrollOrigin(view);
 		var lineHeight = lineHeightAt(view, range.head);
 		var glyphTop = coords.top - origin.top;
-		var glyphBottom = coords.bottom - origin.top;
-		var glyphHeight = glyphBottom - glyphTop;
-		var leading = lineHeight - glyphHeight;
+		var leading = lineHeight - (coords.bottom - coords.top);
 		var top = glyphTop - Math.max(0, leading) / 2;
-		var selBg = view.dom.querySelector(".cm-selectionBackground");
-		var selTop = selBg ? selBg.getBoundingClientRect().top - origin.top : null;
-		var selHeight = selBg ? selBg.getBoundingClientRect().height : null;
-		console.log("[cursor-debug]",
-			"platform:", JSON.stringify({ isMacOS: obsidian.Platform.isMacOS, isWin: obsidian.Platform.isWin }),
-			"| glyphTop:", glyphTop,
-			"| glyphBottom:", glyphBottom,
-			"| glyphHeight:", glyphHeight,
-			"| lineHeight:", lineHeight,
-			"| leading:", leading,
-			"| cursorTop:", top,
-			"| selTop:", selTop,
-			"| selHeight:", selHeight,
-			"| selTop-cursorTop:", selTop != null ? selTop - top : "n/a",
-		);
 		return new CursorWidget(
 			className,
 			coords.left - origin.left,
