@@ -190,18 +190,11 @@ var CursorWidget = (function () {
 		if (!coords) return null;
 		var origin = getScrollOrigin(view);
 		var lineHeight = lineHeightAt(view, range.head);
-		// On macOS, CoreText reports full glyph bounds (including descenders).
-		// half_leading = (lineHeight - glyphHeight) / 2 shifts cursor top up
-		// to the CSS line-box top, which is where the selection highlight starts.
-		// On other platforms coords.top is already at the line-box top.
 		var glyphTop = coords.top - origin.top;
 		var glyphBottom = coords.bottom - origin.top;
 		var glyphHeight = glyphBottom - glyphTop;
 		var leading = lineHeight - glyphHeight;
-		var top = glyphTop;
-		if (obsidian.Platform.isMacOS) {
-			top -= leading / 2;
-		}
+		var top = glyphTop - Math.max(0, leading) / 2;
 		var selBg = view.dom.querySelector(".cm-selectionBackground");
 		var selTop = selBg ? selBg.getBoundingClientRect().top - origin.top : null;
 		var selHeight = selBg ? selBg.getBoundingClientRect().height : null;
@@ -235,10 +228,7 @@ var CursorWidget = (function () {
 		if (!coords) return null;
 		var origin = getScrollOrigin(hostView);
 		var lineHeight = lineHeightAt(activeView, range.head);
-		var top = coords.top - origin.top;
-		if (obsidian.Platform.isMacOS) {
-			top -= (lineHeight - (coords.bottom - coords.top)) / 2;
-		}
+		var top = coords.top - origin.top - Math.max(0, lineHeight - (coords.bottom - coords.top)) / 2;
 		return new CursorWidget(
 			className,
 			coords.left - origin.left,
