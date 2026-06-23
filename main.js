@@ -113,7 +113,8 @@ function lineHeightAt(view, pos) {
 	try {
 		var node = view.domAtPos(pos).node;
 		if (node.nodeType === 3) node = node.parentElement;
-		var h = parseFloat(getComputedStyle(node).lineHeight);
+		var lineEl = node.closest('.cm-line') || node;
+		var h = parseFloat(getComputedStyle(lineEl).lineHeight);
 		if (h > 0) return h;
 	} catch (e) {}
 	return view.defaultLineHeight;
