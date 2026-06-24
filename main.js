@@ -193,7 +193,7 @@ var CursorWidget = (function () {
 		var lineHeight = lineHeightAt(view, range.head);
 		var glyphTop = coords.top - origin.top;
 		var leading = lineHeight - (coords.bottom - coords.top);
-		var top = glyphTop - Math.max(0, leading) / 2;
+		var top = glyphTop - leading / 2;
 		return new CursorWidget(
 			className,
 			coords.left - origin.left,
@@ -212,7 +212,7 @@ var CursorWidget = (function () {
 		if (!coords) return null;
 		var origin = getScrollOrigin(hostView);
 		var lineHeight = lineHeightAt(activeView, range.head);
-		var top = coords.top - origin.top - Math.max(0, lineHeight - (coords.bottom - coords.top)) / 2;
+		var top = coords.top - origin.top - (lineHeight - (coords.bottom - coords.top)) / 2;
 		return new CursorWidget(
 			className,
 			coords.left - origin.left,
