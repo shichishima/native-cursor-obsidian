@@ -210,7 +210,17 @@ var CursorWidget = (function () {
 		className,
 		range,
 	) {
-		var coords = activeView.coordsAtPos(range.head, range.assoc || 1);
+		var coords;
+		try {
+			coords = activeView.coordsAtPos(range.head, range.assoc || 1);
+		} catch (e) {
+			// range.head can be null immediately after clicking into a
+			// previously-empty cell, before its inner view is fully
+			// initialized - coordsAtPos throws instead of returning null in
+			// that case. Skip drawing the cursor for this pass; it reappears
+			// on the next natural redraw (e.g. the next click/selection change).
+			return null;
+		}
 		if (!coords) return null;
 		var origin = getScrollOrigin(hostView);
 		var lineHeight = lineHeightAt(activeView, range.head);
