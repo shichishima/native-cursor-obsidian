@@ -386,15 +386,13 @@ var DEFAULT_SETTINGS = {
  * === Settings tab ===
  */
 
-var CursorSettingTab = (function (_super) {
-	Object.setPrototypeOf(CursorSettingTab.prototype, _super.prototype);
-
-	function CursorSettingTab(app, plugin) {
-		_super.call(this, app, plugin);
+class CursorSettingTab extends obsidian.PluginSettingTab {
+	constructor(app, plugin) {
+		super(app, plugin);
 		this.plugin = plugin;
 	}
 
-	CursorSettingTab.prototype.display = function () {
+	display() {
 		var _this = this;
 		var containerEl = this.containerEl;
 		containerEl.empty();
@@ -463,32 +461,167 @@ var CursorSettingTab = (function (_super) {
 						_this.display();
 					});
 			});
-	};
+	}
 
-	CursorSettingTab.prototype.hide = function () {
+	hide() {
 		this.containerEl.empty();
-		obsidian.PluginSettingTab.prototype.hide.call(this);
-	};
+		super.hide();
+	}
+}
 
-	return CursorSettingTab;
-})(obsidian.PluginSettingTab);
+/*
+ * === Inline title cursor (non-CM6, plain contenteditable) ===
+ * Rough first pass: hides the native caret and tracks the real
+ * Selection/Range with a synthetic overlay div, reusing the same
+ * cursor-width / cursor-color / cursor-blink-name CSS vars applyStyles()
+ * already maintains, so title and editor cursors always stay in sync.
+ */
+
+var TITLE_SELECTOR = ".inline-title[contenteditable='true']";
+
+class InlineTitleCaret {
+	constructor() {
+		this.activeTitle = null;
+		this.rafId = null;
+		this.disposers = [];
+
+		this.caretEl = document.createElement("span");
+		this.caretEl.className = "native-cursor-title-caret native-cursor-title-caret-hidden";
+		this.caretEl.setAttribute("aria-hidden", "true");
+		document.body.appendChild(this.caretEl);
+
+		this.onFocusIn = (e) => {
+			var title = this.getTitleFromTarget(e.target);
+			if (title) {
+				this.setActiveTitle(title);
+				this.requestRender();
+			}
+		};
+		this.onFocusOut = () => {
+			window.setTimeout(() => {
+				this.syncFromSelection();
+				this.requestRender();
+			}, 0);
+		};
+		this.onActivity = () => {
+			this.syncFromSelection();
+			this.requestRender();
+		};
+		this.requestRender = () => {
+			if (this.rafId !== null) return;
+			this.rafId = window.requestAnimationFrame(() => {
+				this.rafId = null;
+				this.render();
+			});
+		};
+
+		this.addListener(document, "focusin", this.onFocusIn, true);
+		this.addListener(document, "focusout", this.onFocusOut, true);
+		this.addListener(document, "selectionchange", this.onActivity);
+		this.addListener(document, "keydown", this.onActivity, true);
+		this.addListener(document, "input", this.onActivity, true);
+		this.addListener(document, "pointerdown", this.onActivity, true);
+		this.addListener(window, "resize", this.requestRender);
+		this.addListener(window, "scroll", this.requestRender, true);
+
+		this.syncFromSelection();
+		this.requestRender();
+	}
+
+	addListener(target, name, fn, opts) {
+		target.addEventListener(name, fn, opts);
+		this.disposers.push(() => target.removeEventListener(name, fn, opts));
+	}
+
+	getTitleFromTarget(target) {
+		if (!(target instanceof Node)) return null;
+		var el = target instanceof HTMLElement ? target : target.parentElement;
+		if (!el) return null;
+		var title = el.closest(TITLE_SELECTOR);
+		return title instanceof HTMLElement ? title : null;
+	}
+
+	syncFromSelection() {
+		var sel = window.getSelection();
+		if (!sel || sel.rangeCount === 0) {
+			this.setActiveTitle(null);
+			return;
+		}
+		this.setActiveTitle(this.getTitleFromTarget(sel.anchorNode));
+	}
+
+	setActiveTitle(next) {
+		if (this.activeTitle === next) return;
+		if (this.activeTitle) this.activeTitle.style.removeProperty("caret-color");
+		this.activeTitle = next;
+		if (this.activeTitle) this.activeTitle.style.setProperty("caret-color", "transparent", "important");
+	}
+
+	render() {
+		var sel = window.getSelection();
+		if (!this.activeTitle || !sel || sel.rangeCount === 0) {
+			this.hide();
+			return;
+		}
+		var focusNode = sel.focusNode;
+		if (!focusNode || !this.activeTitle.contains(focusNode)) {
+			this.hide();
+			return;
+		}
+		var range;
+		try {
+			range = document.createRange();
+			range.setStart(focusNode, sel.focusOffset);
+			range.collapse(true);
+		} catch (e) {
+			this.hide();
+			return;
+		}
+		var rect = this.getCaretRect(range);
+		if (!rect) {
+			this.hide();
+			return;
+		}
+		this.caretEl.style.left = rect.left + "px";
+		this.caretEl.style.top = rect.top + "px";
+		this.caretEl.style.height = rect.height + "px";
+		this.caretEl.classList.remove("native-cursor-title-caret-hidden");
+	}
+
+	hide() {
+		this.caretEl.classList.add("native-cursor-title-caret-hidden");
+	}
+
+	getCaretRect(range) {
+		var rects = range.getClientRects();
+		var r = rects.length > 0 ? rects.item(0) : null;
+		if (r && (r.height > 0 || r.width > 0)) return r;
+		var fallback = range.getBoundingClientRect();
+		if (fallback.height > 0 || fallback.width > 0) return fallback;
+		return null;
+	}
+
+	destroy() {
+		for (var i = 0; i < this.disposers.length; i++) this.disposers[i]();
+		if (this.activeTitle) this.activeTitle.style.removeProperty("caret-color");
+		this.caretEl.remove();
+	}
+}
 
 /*
  * === Main plugin ===
  */
 
-var NativeCursorPlugin = (function (_super) {
-	Object.setPrototypeOf(NativeCursorPlugin.prototype, _super.prototype);
-
-	function NativeCursorPlugin() {
-		_super.apply(this, arguments);
+class NativeCursorPlugin extends obsidian.Plugin {
+	constructor(...args) {
+		super(...args);
 		this.alreadyPatched = false;
 		this.tryPatchRef = null;
 		this.cursorPlugin = null;
 		this.styleEl = null;
 	}
 
-	NativeCursorPlugin.prototype.onload = async function () {
+	async onload() {
 		await this.loadSettings();
 		this.alreadyPatched = false;
 
@@ -499,6 +632,7 @@ var NativeCursorPlugin = (function (_super) {
 
 		this.addSettingTab(new CursorSettingTab(this.app, this));
 		this.registerEditorExtension(tableCellViewPlugin);
+		this.titleCaret = new InlineTitleCaret();
 
 		var activeEditor =
 			this.app.workspace.activeEditor && this.app.workspace.activeEditor.editor;
@@ -510,9 +644,9 @@ var NativeCursorPlugin = (function (_super) {
 				this.tryPatch.bind(this),
 			);
 		}
-	};
+	}
 
-	NativeCursorPlugin.prototype.applyStyles = function () {
+	applyStyles() {
 		var s = this.settings;
 		// Only dynamic, user-controlled values live here, all structural CSS in styles.css
 		this.styleEl.textContent = [
@@ -523,9 +657,9 @@ var NativeCursorPlugin = (function (_super) {
 			"  --cursor-blink-name: " + (s.blink ? "cm-cursor-blink" : "none") + ";",
 			"}",
 		].join("\n");
-	};
+	}
 
-	NativeCursorPlugin.prototype.tryPatch = function (editor) {
+	tryPatch(editor) {
 		if (this.alreadyPatched) {
 			this.cancelPatchAttempt();
 			return;
@@ -538,30 +672,32 @@ var NativeCursorPlugin = (function (_super) {
 			this.cursorPlugin = found;
 			this.cancelPatchAttempt();
 		}
-	};
+	}
 
-	NativeCursorPlugin.prototype.cancelPatchAttempt = function () {
+	cancelPatchAttempt() {
 		if (this.tryPatchRef) {
 			this.app.workspace.offref(this.tryPatchRef);
 			delete this.tryPatchRef;
 		}
-	};
+	}
 
-	NativeCursorPlugin.prototype.onunload = function () {
+	onunload() {
 		this.cancelPatchAttempt();
 		if (this.styleEl) this.styleEl.remove();
-	};
+		if (this.titleCaret) {
+			this.titleCaret.destroy();
+			this.titleCaret = null;
+		}
+	}
 
-	NativeCursorPlugin.prototype.loadSettings = async function () {
+	async loadSettings() {
 		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
-	};
+	}
 
-	NativeCursorPlugin.prototype.saveSettings = async function () {
+	async saveSettings() {
 		await this.saveData(this.settings);
 		this.applyStyles();
-	};
-
-	return NativeCursorPlugin;
-})(obsidian.Plugin);
+	}
+}
 
 module.exports = NativeCursorPlugin;

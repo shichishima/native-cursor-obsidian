@@ -63,3 +63,34 @@
 .cm-hasTablePointed .cm-cursorLayer .cm-cursor {
 	display: block;
 }
+
+/* Inline title cursor (rough first pass): fixed-position overlay, not part
+   of CM6 at all — see InlineTitleCaret in main.js. Hides and repositions
+   itself via JS; this just supplies width/color/blink from the same vars
+   the main editor cursor uses. */
+.native-cursor-title-caret {
+	position: fixed;
+	width: var(--cursor-width);
+	pointer-events: none;
+	z-index: 1000;
+}
+
+.native-cursor-title-caret-hidden {
+	display: none;
+}
+
+.theme-dark .native-cursor-title-caret {
+	background-color: var(--cursor-color-dark);
+}
+
+.theme-light .native-cursor-title-caret {
+	background-color: var(--cursor-color-light);
+}
+
+.native-cursor-title-caret:not(.native-cursor-title-caret-hidden) {
+	animation-name: var(--cursor-blink-name);
+	animation-duration: 500ms;
+	animation-timing-function: ease-in-out;
+	animation-direction: alternate-reverse;
+	animation-iteration-count: infinite;
+}
