@@ -582,9 +582,26 @@ class InlineTitleCaret {
 			this.hide();
 			return;
 		}
+		// Same fix as the editor-side CursorWidget.forRange/forTableCellRange
+		// (see lineHeightAt() above): a collapsed Range's own
+		// getClientRects() reports the GLYPH's bounding box, not the
+		// line's actual CSS line-height - on Windows in particular this
+		// makes the cursor visibly shorter than the browser's own native
+		// selection-highlight rendering for the same line. Match the
+		// title element's own computed line-height the same way, falling
+		// back to the raw glyph rect if line-height can't be read as a
+		// pixel value (e.g. "normal").
+		var lineHeight = parseFloat(getComputedStyle(this.activeTitle).lineHeight);
+		var top = rect.top;
+		var height = rect.height;
+		if (isFinite(lineHeight) && lineHeight > 0) {
+			var leading = lineHeight - rect.height;
+			top = rect.top - Math.max(0, leading) / 2;
+			height = Math.max(lineHeight, rect.height);
+		}
 		this.caretEl.style.left = rect.left + "px";
-		this.caretEl.style.top = rect.top + "px";
-		this.caretEl.style.height = rect.height + "px";
+		this.caretEl.style.top = top + "px";
+		this.caretEl.style.height = height + "px";
 		this.caretEl.classList.remove("native-cursor-title-caret-hidden");
 	}
 
