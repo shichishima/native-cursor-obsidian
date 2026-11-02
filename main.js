@@ -661,6 +661,38 @@ class NativeCursorPlugin extends obsidian.Plugin {
 				this.tryPatch.bind(this),
 			);
 		}
+
+		// Force a fresh cursor-layer redraw whenever a CM6 editor's own
+		// contentDOM gains real DOM focus. layerUpdate's own gating
+		// (view.hasFocus || isOverTable) only redraws in response to a
+		// transaction carrying docChanged/selectionSet - if the selection
+		// was set via editor.setCursor()/dispatch() slightly BEFORE DOM
+		// focus actually lands on the editor (confirmed live: a plugin
+		// moving focus OUT of a non-CM6 element like Obsidian's own
+		// Properties panel into the editor, e.g. a native Arrow-key
+		// escape, doesn't synchronize its own focus() call with the
+		// selection-setting transaction), that transaction's own
+		// view.hasFocus reads false at the time, and layerUpdate skips
+		// the redraw - leaving the cursor rendered at its OLD position
+		// (wherever the editor's own selection was from a previous
+		// session) until some LATER update happens to redraw it. This
+		// bypasses that gate entirely: on focusin, finds the specific
+		// cursor-layer plugin instance bound to the now-focused view and
+		// forces its own already-scheduled measure request to run, which
+		// calls markers() (and this plugin's own patched version of it)
+		// fresh, using the NOW-correct coordsAtPos-based position -
+		// independent of whatever layerUpdate decided earlier.
+		this.registerDomEvent(document, "focusin", (e) => {
+			var target = e.target;
+			var cmContent = target && target.closest && target.closest(".cm-content");
+			if (!cmContent) return;
+			var view = codemirrorView.EditorView.findFromDOM(cmContent);
+			if (!view) return;
+			var plugin = findCursorLayerPlugin(view);
+			if (plugin && plugin.value && plugin.value.measureReq) {
+				view.requestMeasure(plugin.value.measureReq);
+			}
+		}, true);
 	}
 
 	applyStyles() {
