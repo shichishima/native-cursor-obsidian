@@ -475,9 +475,22 @@ class CursorSettingTab extends obsidian.PluginSettingTab {
  * Selection/Range with a synthetic overlay div, reusing the same
  * cursor-width / cursor-color / cursor-blink-name CSS vars applyStyles()
  * already maintains, so title and editor cursors always stay in sync.
+ *
+ * Also covers the frontmatter Properties panel's own text-type value
+ * widget and a Bases table's own text cell editor — both render as the
+ * exact same ".metadata-input-longtext[contenteditable]" element
+ * (confirmed live), and list/tags/aliases types' own trailing input as
+ * ".multi-select-input[contenteditable]" — neither is CM6-backed, so
+ * neither gets the editor's own cursor styling without this same
+ * Range-based overlay approach. Deliberately NOT extended to plain
+ * <input> fields (property name, number/date/checkbox types) — the
+ * Selection/Range API this relies on doesn't apply to <input> elements
+ * at all (they use selectionStart/selectionEnd instead), which would
+ * need a different, more involved approach (e.g. a hidden mirror span
+ * for measuring caret position) to support width, not just color.
  */
 
-var TITLE_SELECTOR = ".inline-title[contenteditable='true']";
+var TITLE_SELECTOR = ".inline-title[contenteditable='true'], .metadata-input-longtext[contenteditable='true'], .multi-select-input[contenteditable='true']";
 
 class InlineTitleCaret {
 	constructor() {

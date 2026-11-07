@@ -64,6 +64,28 @@
 	display: block;
 }
 
+/* Frontmatter Properties panel's own "item selection" focus ring, and a
+   Bases table's own active-cell indicator — confirmed live (computed-
+   style dump) both render via the exact same box-shadow ring
+   (0 0 0 2px <theme gray>, not outline/border despite those properties
+   also being set to a nonzero width — outline-style is "none" there,
+   so it never actually paints). Reusing --cursor-width/-color here
+   keeps this ring in sync with the editor cursor's own settings, at
+   half the cursor's own width — a full-width ring around an entire
+   row/cell read as too heavy compared to the cursor it's tracking.
+   Floored at 1px: plain half-width alone put the ring at 0.5px for
+   the slider's thinnest setting (cursorWidth 1), too faint to read as
+   an intentional ring rather than a rendering artifact. */
+.theme-dark .metadata-property:focus-within,
+.theme-dark .bases-table-active-cell {
+	box-shadow: 0 0 0 max(1px, calc(var(--cursor-width) / 2)) var(--cursor-color-dark) !important;
+}
+
+.theme-light .metadata-property:focus-within,
+.theme-light .bases-table-active-cell {
+	box-shadow: 0 0 0 max(1px, calc(var(--cursor-width) / 2)) var(--cursor-color-light) !important;
+}
+
 /* Inline title cursor (rough first pass): fixed-position overlay, not part
    of CM6 at all — see InlineTitleCaret in main.js. Hides and repositions
    itself via JS; this just supplies width/color/blink from the same vars
