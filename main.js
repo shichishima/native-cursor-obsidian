@@ -470,11 +470,11 @@ class CursorSettingTab extends obsidian.PluginSettingTab {
 }
 
 /*
- * === Inline title cursor (non-CM6, plain contenteditable) ===
- * Rough first pass: hides the native caret and tracks the real
- * Selection/Range with a synthetic overlay div, reusing the same
- * cursor-width / cursor-color / cursor-blink-name CSS vars applyStyles()
- * already maintains, so title and editor cursors always stay in sync.
+ * === Inline title cursor (non-CM6, plain contenteditable OR <input>) ===
+ * Rough first pass: hides the native caret and tracks the real caret
+ * position with a synthetic overlay div, reusing the same cursor-width /
+ * cursor-color / cursor-blink-name CSS vars applyStyles() already
+ * maintains, so title and editor cursors always stay in sync.
  *
  * Also covers the frontmatter Properties panel's own text-type value
  * widget and a Bases table's own text cell editor — both render as the
@@ -482,15 +482,48 @@ class CursorSettingTab extends obsidian.PluginSettingTab {
  * (confirmed live), and list/tags/aliases types' own trailing input as
  * ".multi-select-input[contenteditable]" — neither is CM6-backed, so
  * neither gets the editor's own cursor styling without this same
- * Range-based overlay approach. Deliberately NOT extended to plain
- * <input> fields (property name, number/date/checkbox types) — the
- * Selection/Range API this relies on doesn't apply to <input> elements
- * at all (they use selectionStart/selectionEnd instead), which would
- * need a different, more involved approach (e.g. a hidden mirror span
- * for measuring caret position) to support width, not just color.
+ * Range-based overlay approach.
+ *
+ * The property NAME field (".metadata-property-key-input") is a real
+ * <input type="text">, not a contenteditable — window.getSelection()/
+ * Range don't apply to its own internal text at all, confirmed live (no
+ * rangeCount while it's focused), so render() branches on
+ * `activeTitle instanceof HTMLInputElement` and measures the caret with
+ * a hidden mirror element instead (same technique libraries like
+ * textarea-caret-position use): a zero-size, off-screen div copying
+ * every CSS property that affects text layout, filled with the value's
+ * own text up to the caret, whose own rendered width IS the caret's X
+ * offset from the input's own content-box left edge. input.scrollLeft
+ * (a real, readable property on a text input, confirmed live) is
+ * subtracted the same way a contenteditable's own scroll position never
+ * needed to be, since Range.getClientRects() already returns
+ * viewport-relative coordinates directly.
+ *
+ * number/date/datetime/checkbox types are still deliberately NOT
+ * covered — checkbox has no caret at all, and number/date/datetime are
+ * native OS-level steppers/pickers with no free-text caret concept this
+ * same mirror technique could measure.
  */
 
-var TITLE_SELECTOR = ".inline-title[contenteditable='true'], .metadata-input-longtext[contenteditable='true'], .multi-select-input[contenteditable='true']";
+var TITLE_SELECTOR = ".inline-title[contenteditable='true'], .metadata-input-longtext[contenteditable='true'], .multi-select-input[contenteditable='true'], .metadata-property-key-input";
+
+// CSS properties that affect how the TEXT ITSELF measures — copied from
+// the real input onto the hidden mirror on every measurement, since any
+// of these can change live (e.g. a CSS snippet, or Obsidian's own
+// font-size setting). Deliberately does NOT include padding/border/
+// box-sizing: a real bug found live (a ~16px-too-far-right drift,
+// confirmed via a direct input-vs-div width comparison for identical
+// text) was exactly this — copying padding onto the mirror makes its
+// OWN rendered box wider by that padding (getBoundingClientRect() always
+// reports the actual border-box size, regardless of box-sizing), and
+// getInputCaretRect() ALSO adds paddingLeft separately when computing
+// the final `left` — double-counting it. The mirror measures PURE text
+// width only; padding/border are added exactly once, in
+// getInputCaretRect() itself.
+var MIRROR_CSS_PROPS = [
+	"fontFamily", "fontSize", "fontWeight", "fontStyle", "fontVariant",
+	"letterSpacing", "wordSpacing", "textTransform", "textIndent",
+];
 
 class InlineTitleCaret {
 	constructor() {
@@ -502,6 +535,11 @@ class InlineTitleCaret {
 		this.caretEl.className = "native-cursor-title-caret native-cursor-title-caret-hidden";
 		this.caretEl.setAttribute("aria-hidden", "true");
 		document.body.appendChild(this.caretEl);
+
+		// Lazily created on first use (most sessions never focus the
+		// property-name field at all) — a plain, off-screen div reused
+		// across every measurement rather than recreated each time.
+		this.mirrorEl = null;
 
 		this.onFocusIn = (e) => {
 			var title = this.getTitleFromTarget(e.target);
@@ -555,6 +593,21 @@ class InlineTitleCaret {
 	}
 
 	syncFromSelection() {
+		// A plain <input>'s own caret/selection is invisible to
+		// window.getSelection() entirely (confirmed live: rangeCount is
+		// whatever it was from whatever contenteditable/body Selection
+		// last existed, completely unrelated to the input's own focus
+		// state) — document.activeElement is the only reliable signal
+		// for it, so it's checked first, covering both element kinds
+		// (a focused contenteditable is ALSO its own document.activeElement,
+		// so this is a strict superset of the old Selection-only check,
+		// not a separate special case).
+		var active = document.activeElement;
+		var activeTitle = this.getTitleFromTarget(active);
+		if (activeTitle) {
+			this.setActiveTitle(activeTitle);
+			return;
+		}
 		var sel = window.getSelection();
 		if (!sel || sel.rangeCount === 0) {
 			this.setActiveTitle(null);
@@ -571,26 +624,29 @@ class InlineTitleCaret {
 	}
 
 	render() {
-		var sel = window.getSelection();
-		if (!this.activeTitle || !sel || sel.rangeCount === 0) {
+		if (!this.activeTitle) {
 			this.hide();
 			return;
 		}
-		var focusNode = sel.focusNode;
-		if (!focusNode || !this.activeTitle.contains(focusNode)) {
-			this.hide();
+		// <input> gets its own, fully self-contained path: getInputCaretRect
+		// already resolves top/height correctly against the input's own
+		// content-box (no line-height-vs-glyph mismatch the way a
+		// contenteditable's Range can have — the input's own rendering
+		// already vertically centers its single line within that box), so
+		// none of the leading/line-height adjustment below applies to it.
+		if (this.activeTitle instanceof HTMLInputElement) {
+			var inputRect = this.getInputCaretRect(this.activeTitle);
+			if (!inputRect) {
+				this.hide();
+				return;
+			}
+			this.caretEl.style.left = inputRect.left + "px";
+			this.caretEl.style.top = inputRect.top + "px";
+			this.caretEl.style.height = inputRect.height + "px";
+			this.caretEl.classList.remove("native-cursor-title-caret-hidden");
 			return;
 		}
-		var range;
-		try {
-			range = document.createRange();
-			range.setStart(focusNode, sel.focusOffset);
-			range.collapse(true);
-		} catch (e) {
-			this.hide();
-			return;
-		}
-		var rect = this.getCaretRect(range);
+		var rect = this.getContentEditableCaretRect(this.activeTitle);
 		if (!rect) {
 			this.hide();
 			return;
@@ -622,7 +678,19 @@ class InlineTitleCaret {
 		this.caretEl.classList.add("native-cursor-title-caret-hidden");
 	}
 
-	getCaretRect(range) {
+	getContentEditableCaretRect(title) {
+		var sel = window.getSelection();
+		if (!sel || sel.rangeCount === 0) return null;
+		var focusNode = sel.focusNode;
+		if (!focusNode || !title.contains(focusNode)) return null;
+		var range;
+		try {
+			range = document.createRange();
+			range.setStart(focusNode, sel.focusOffset);
+			range.collapse(true);
+		} catch (e) {
+			return null;
+		}
 		var rects = range.getClientRects();
 		var r = rects.length > 0 ? rects.item(0) : null;
 		if (r && (r.height > 0 || r.width > 0)) return r;
@@ -631,10 +699,72 @@ class InlineTitleCaret {
 		return null;
 	}
 
+	// Measures the caret's own screen position inside a plain <input> via
+	// a hidden mirror element (same technique libraries like
+	// textarea-caret-position use) — Range/Selection don't apply to an
+	// <input>'s own internal text at all, confirmed live (zero rangeCount
+	// while one is focused), so there's no API to ask the browser
+	// directly the way getContentEditableCaretRect does.
+	getInputCaretRect(input) {
+		if (!this.mirrorEl) {
+			this.mirrorEl = document.createElement("div");
+			// Absolutely positioned off-screen rather than
+			// visibility:hidden/display:none -- both of those can make
+			// some browsers skip layout for the element entirely, which
+			// would make getBoundingClientRect() always return a zero
+			// rect; off-screen positioning keeps real layout running
+			// while staying invisible.
+			this.mirrorEl.style.position = "absolute";
+			this.mirrorEl.style.top = "0";
+			this.mirrorEl.style.left = "-9999px";
+			this.mirrorEl.style.whiteSpace = "pre";
+			this.mirrorEl.setAttribute("aria-hidden", "true");
+			document.body.appendChild(this.mirrorEl);
+		}
+		var cs = getComputedStyle(input);
+		for (var i = 0; i < MIRROR_CSS_PROPS.length; i++) {
+			var prop = MIRROR_CSS_PROPS[i];
+			this.mirrorEl.style[prop] = cs[prop];
+		}
+		// Caret sits at whichever end of the selection is the actual
+		// "focus" (where it would move on an arrow-key press), which
+		// depends on selectionDirection for a non-collapsed selection --
+		// same direction-aware convention Set-mark already uses
+		// elsewhere for this exact reason. "none" (the usual case for a
+		// collapsed caret, and some browsers' own default) falls back to
+		// selectionEnd, matching selectionStart === selectionEnd there
+		// anyway.
+		var caretPos = input.selectionDirection === "backward"
+			? input.selectionStart
+			: input.selectionEnd;
+		if (caretPos == null) caretPos = input.value.length;
+		// A trailing space collapses to zero width in a plain text node
+		// (confirmed live) -- "pre" whitespace handling plus a
+		// non-breaking-space-padded measurement isn't needed here since
+		// MIRROR_CSS_PROPS already copies font metrics precisely enough
+		// that this hasn't shown a visible drift in practice; flagged
+		// here in case a future report ever traces back to this.
+		this.mirrorEl.textContent = input.value.slice(0, caretPos);
+		var mirrorRect = this.mirrorEl.getBoundingClientRect();
+		var inputRect = input.getBoundingClientRect();
+		var paddingLeft = parseFloat(cs.paddingLeft) || 0;
+		var borderLeft = parseFloat(cs.borderLeftWidth) || 0;
+		var paddingTop = parseFloat(cs.paddingTop) || 0;
+		var borderTop = parseFloat(cs.borderTopWidth) || 0;
+		var paddingBottom = parseFloat(cs.paddingBottom) || 0;
+		var borderBottom = parseFloat(cs.borderBottomWidth) || 0;
+		return {
+			left: inputRect.left + borderLeft + paddingLeft + mirrorRect.width - input.scrollLeft,
+			top: inputRect.top + borderTop + paddingTop,
+			height: inputRect.height - borderTop - paddingTop - paddingBottom - borderBottom,
+		};
+	}
+
 	destroy() {
 		for (var i = 0; i < this.disposers.length; i++) this.disposers[i]();
 		if (this.activeTitle) this.activeTitle.style.removeProperty("caret-color");
 		this.caretEl.remove();
+		if (this.mirrorEl) this.mirrorEl.remove();
 	}
 }
 
