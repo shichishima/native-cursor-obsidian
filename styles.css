@@ -75,15 +75,64 @@
    row/cell read as too heavy compared to the cursor it's tracking.
    Floored at 1px: plain half-width alone put the ring at 0.5px for
    the slider's thinnest setting (cursorWidth 1), too faint to read as
-   an intentional ring rather than a rendering artifact. */
+   an intentional ring rather than a rendering artifact.
+
+   The Properties heading ("Properties") and the Add-property button
+   ("+ Add property") are two more real keyboard-focusable stops in the
+   same item-selection navigation (confirmed live: both genuinely
+   become document.activeElement, tabIndex 0) but were missing from
+   this rule entirely — the heading showed NO ring at all (boxShadow:
+   none), and the Add-button's own ring, where it appeared, turned out
+   to be the ambient theme's own default styling, not this plugin's —
+   confirmed live it's identical with or without real focus and
+   doesn't change with --cursor-width, so a different theme could
+   plausibly drop it the same way the heading already has none. Added
+   both here directly with :focus (not :focus-within -- unlike the row,
+   neither has a focusable descendant to worry about) so the ring is
+   consistent and theme-independent for every item-selection stop. */
 .theme-dark .metadata-property:focus-within,
+.theme-dark .metadata-add-button:focus,
 .theme-dark .bases-table-active-cell {
 	box-shadow: 0 0 0 max(1px, calc(var(--cursor-width) / 2)) var(--cursor-color-dark) !important;
 }
 
 .theme-light .metadata-property:focus-within,
+.theme-light .metadata-add-button:focus,
 .theme-light .bases-table-active-cell {
 	box-shadow: 0 0 0 max(1px, calc(var(--cursor-width) / 2)) var(--cursor-color-light) !important;
+}
+
+/* The heading itself is a separate rule, not merged into the group
+   above: confirmed live (computed-style dump against Obsidian 1.15.0,
+   this plugin NOT loaded) the real element has border-radius: 0 -- a
+   plain square box, unlike the row/Bases cell/Add-button, which
+   already have some rounding of their own (the Add-button alone is
+   8px). Two earlier attempts at a fixed radius on the REAL element
+   (var(--radius-s), then a 999px pill) both still showed a visible
+   double-ring in a real-vault screenshot -- turned out Obsidian 1.15.1
+   (a beta release, not yet reproducible in this plugin's own dev
+   environment) added its own native focus ring as a SEPARATE layer,
+   not on the real element at all but on its own `::before` pseudo-
+   element (`.metadata-properties-heading::before`, already present
+   unconditionally as the chip's own visual background/shape, using
+   `border-radius: var(--metadata-property-radius)` -- confirmed via a
+   live DevTools Styles-panel read on 1.15.1, since this plugin's own
+   E2E harness is pinned to 1.15.0 and can't reach a beta build without
+   separate Insiders credentials). Overriding box-shadow on the real
+   element never had any chance of replacing that -- it's a completely
+   different paint target. Targeting `::before` directly instead, and
+   reusing `var(--metadata-property-radius)` (Obsidian's own variable
+   for this exact chip, not a hardcoded guess) keeps this ring's own
+   corners correct regardless of whatever Obsidian version or theme
+   ships that variable with. */
+.theme-dark .metadata-properties-heading:focus::before {
+	box-shadow: 0 0 0 max(1px, calc(var(--cursor-width) / 2)) var(--cursor-color-dark) !important;
+	border-radius: var(--metadata-property-radius);
+}
+
+.theme-light .metadata-properties-heading:focus::before {
+	box-shadow: 0 0 0 max(1px, calc(var(--cursor-width) / 2)) var(--cursor-color-light) !important;
+	border-radius: var(--metadata-property-radius);
 }
 
 /* Inline title cursor (rough first pass): fixed-position overlay, not part
