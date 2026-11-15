@@ -499,13 +499,30 @@ class CursorSettingTab extends obsidian.PluginSettingTab {
  * needed to be, since Range.getClientRects() already returns
  * viewport-relative coordinates directly.
  *
- * number/date/datetime/checkbox types are still deliberately NOT
- * covered — checkbox has no caret at all, and number/date/datetime are
- * native OS-level steppers/pickers with no free-text caret concept this
- * same mirror technique could measure.
+ * A Bases/Properties number cell (".metadata-input-number") turned out
+ * to be a real <input type="number"> rendering a normal free-text
+ * caret, not a native OS-level stepper -- confirmed live it behaves
+ * exactly like the property NAME field above for this purpose, just
+ * with one real platform wall: .selectionStart/.selectionEnd/
+ * .selectionDirection are not readable on this input type at all
+ * (confirmed live: reads back as null rather than throwing, in this
+ * Chromium build), and there's no event to re-measure from once focused
+ * (no "selectionchange", confirmed live on arrow-key/Home/End presses
+ * too). An earlier version of this file estimated an initial caret
+ * index from the click's own clientX and left it there, but confirmed
+ * live that the overlay then stayed frozen at that position while the
+ * REAL caret kept moving on every arrow-key press -- a custom cursor
+ * that looks confidently wrong is worse than none at all. Reverted to
+ * treating this input type as untracked (getTitleFromTarget excludes
+ * it explicitly): the browser's own native caret shows through
+ * instead, which is honest even though it's plainer. checkbox/date/
+ * datetime types are still deliberately NOT covered either -- checkbox
+ * has no caret at all, and date/datetime are native OS-level pickers
+ * with no free-text caret concept this same mirror technique could
+ * measure.
  */
 
-var TITLE_SELECTOR = ".inline-title[contenteditable='true'], .metadata-input-longtext[contenteditable='true'], .multi-select-input[contenteditable='true'], .metadata-property-key-input";
+var TITLE_SELECTOR = ".inline-title[contenteditable='true'], .metadata-input-longtext[contenteditable='true'], .multi-select-input[contenteditable='true'], .metadata-property-key-input, .metadata-input-number";
 
 // CSS properties that affect how the TEXT ITSELF measures — copied from
 // the real input onto the hidden mirror on every measurement, since any
@@ -589,7 +606,20 @@ class InlineTitleCaret {
 		var el = target instanceof HTMLElement ? target : target.parentElement;
 		if (!el) return null;
 		var title = el.closest(TITLE_SELECTOR);
-		return title instanceof HTMLElement ? title : null;
+		if (!(title instanceof HTMLElement)) return null;
+		// A number input's caret can only ever be ESTIMATED from a click's
+		// clientX -- .selectionStart is unreadable and there's no event to
+		// re-measure from on arrow-key/Home/End movement, so an estimate
+		// made on click would freeze there while the REAL caret keeps
+		// moving underneath it, confirmed live to drift silently out of
+		// sync (an earlier version of this file tried exactly that). A
+		// frozen custom cursor that looks confidently wrong is worse than
+		// no custom cursor at all here -- treat this input as untracked
+		// and let the browser's own native caret show through instead
+		// (setActiveTitle never sets caret-color:transparent on it, since
+		// it's simply never reported as the active title).
+		if (title.matches(".metadata-input-number")) return null;
+		return title;
 	}
 
 	syncFromSelection() {
@@ -745,16 +775,35 @@ class InlineTitleCaret {
 		// that this hasn't shown a visible drift in practice; flagged
 		// here in case a future report ever traces back to this.
 		this.mirrorEl.textContent = input.value.slice(0, caretPos);
-		var mirrorRect = this.mirrorEl.getBoundingClientRect();
+		var partialWidth = this.mirrorEl.getBoundingClientRect().width;
 		var inputRect = input.getBoundingClientRect();
 		var paddingLeft = parseFloat(cs.paddingLeft) || 0;
 		var borderLeft = parseFloat(cs.borderLeftWidth) || 0;
+		var paddingRight = parseFloat(cs.paddingRight) || 0;
+		var borderRight = parseFloat(cs.borderRightWidth) || 0;
 		var paddingTop = parseFloat(cs.paddingTop) || 0;
 		var borderTop = parseFloat(cs.borderTopWidth) || 0;
 		var paddingBottom = parseFloat(cs.paddingBottom) || 0;
 		var borderBottom = parseFloat(cs.borderBottomWidth) || 0;
+		var left;
+		if (cs.textAlign === "right") {
+			// Right-aligned text (e.g. a Bases/Properties number cell,
+			// confirmed live) renders flush against the content box's own
+			// RIGHT edge, not the left -- measuring partialWidth from the
+			// left edge (the left-aligned formula below) places the caret
+			// near the input's own left side regardless of where the
+			// text itself actually sits, confirmed live as a real,
+			// visible drift. Need the FULL value's own width too, to
+			// anchor from the right edge: the gap between the full text's
+			// right-aligned end and the caret is (fullWidth - partialWidth).
+			this.mirrorEl.textContent = input.value;
+			var fullWidth = this.mirrorEl.getBoundingClientRect().width;
+			left = inputRect.right - borderRight - paddingRight - (fullWidth - partialWidth) - input.scrollLeft;
+		} else {
+			left = inputRect.left + borderLeft + paddingLeft + partialWidth - input.scrollLeft;
+		}
 		return {
-			left: inputRect.left + borderLeft + paddingLeft + mirrorRect.width - input.scrollLeft,
+			left: left,
 			top: inputRect.top + borderTop + paddingTop,
 			height: inputRect.height - borderTop - paddingTop - paddingBottom - borderBottom,
 		};

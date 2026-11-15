@@ -92,14 +92,36 @@
    consistent and theme-independent for every item-selection stop. */
 .theme-dark .metadata-property:focus-within,
 .theme-dark .metadata-add-button:focus,
-.theme-dark .bases-table-active-cell {
+.theme-dark .bases-table-container:focus-within .bases-table-active-cell {
 	box-shadow: 0 0 0 max(1px, calc(var(--cursor-width) / 2)) var(--cursor-color-dark) !important;
 }
 
 .theme-light .metadata-property:focus-within,
 .theme-light .metadata-add-button:focus,
-.theme-light .bases-table-active-cell {
+.theme-light .bases-table-container:focus-within .bases-table-active-cell {
 	box-shadow: 0 0 0 max(1px, calc(var(--cursor-width) / 2)) var(--cursor-color-light) !important;
+}
+
+/* A Bases table's own sticky header (z-index: 5, confirmed live) sits
+   flush against the first row's own top edge once scrolled to the
+   top -- the active-cell ring above bleeds ~1-2px past the cell's own
+   border box (box-shadow, not border, so it never expands the cell's
+   own layout box), landing inside the header's own rectangle. Since
+   the header has an explicit z-index and the cell's own position is
+   `absolute` with z-index: auto (confirmed live), the header wins that
+   overlap and visually clips the ring's own top edge -- same
+   mechanism, unconfirmed live, likely also clips the bottom edge at
+   the opposite scroll boundary against whatever sits there. Giving the
+   active cell a z-index comfortably above the header's own fixes both
+   without needing to touch Bases' own stacking at all.
+
+   `.bases-table-active-cell` is scoped to `.bases-table-container:focus-
+   within` here too, same reason as the box-shadow rules above (see that
+   comment): the class itself is a stale marker Obsidian leaves behind
+   once focus moves elsewhere -- a bare, unscoped rule has no way to
+   know that, and keeps the ring/z-index applied regardless. */
+.bases-table-container:focus-within .bases-table-active-cell {
+	z-index: 6 !important;
 }
 
 /* The heading itself is a separate rule, not merged into the group
