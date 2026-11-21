@@ -906,20 +906,35 @@ class NativeCursorPlugin extends obsidian.Plugin {
 		this.registerDomEvent(document, "focusin", (e) => {
 			var target = e.target;
 			if (!(target instanceof HTMLElement)) return;
-			// Escape (and similar) moves focus to the plain container
-			// itself -- cell-selection mode, not editing a specific
-			// cell's own widget. Its own rect is the whole table's
-			// bounding box, not any one cell's, and nudging the ring
-			// toward THAT throws it to the table's own top-left corner.
-			// Only correct while a real per-cell widget has focus.
-			if (target.matches(".bases-table-container")) return;
 			if (!target.closest(".bases-table-container")) return;
+			// For a text/number cell, the focused element already IS the
+			// whole cell's own widget, but for a list/tags/aliases cell
+			// the focusin target is only the trailing "type a new value"
+			// input -- offset to the right of however many already-
+			// committed pills precede it, NOT the cell's own left edge.
+			// ".bases-table-cell" is the stable wrapper around the whole
+			// cell (pills + trailing input together), giving the correct
+			// reference point either way, confirmed live for BOTH a plain
+			// focusin target and the nested ".bases-table-container
+			// .node-insert-event" sub-widget Bases focuses while its own
+			// "previously used values" suggester is open while typing a
+			// new pill (same class name as the OUTER container that gets
+			// focus in cell-SELECTION mode, e.g. right after Escape, but
+			// confirmed live it DOES still have a real ".bases-table-cell"
+			// ancestor, unlike that outer/Escape case -- so checking for
+			// that ancestor's existence alone already correctly
+			// distinguishes the two, no separate check needed. Skip
+			// correcting entirely when there's no real cell wrapper to
+			// anchor to (the true cell-SELECTION-mode case), rather than
+			// guessing from whatever else happens to be focused.
+			var positionRef = target.closest(".bases-table-cell");
+			if (!positionRef) return;
 			var attemptsLeft = 15; // ~250ms at 60fps
 			var tick = () => {
 				attemptsLeft--;
 				var ring = document.querySelector(".bases-table-active-cell");
 				if (ring) {
-					var targetRect = target.getBoundingClientRect();
+					var targetRect = positionRef.getBoundingClientRect();
 					var ringRect = ring.getBoundingClientRect();
 					var deltaTop = targetRect.top - ringRect.top;
 					var deltaLeft = targetRect.left - ringRect.left;
