@@ -885,6 +885,55 @@ class NativeCursorPlugin extends obsidian.Plugin {
 				view.requestMeasure(plugin.value.measureReq);
 			}
 		}, true);
+
+		// Work around a core Obsidian Bases bug, confirmed live and
+		// reproduced identically with every plugin disabled (not
+		// introduced by this plugin or by Universal Cursor Hotkeys):
+		// moving from the end of a text cell's content into the next
+		// row's cell via a physical arrow key (wrapping, which opens
+		// that cell's own suggester) moves real DOM focus correctly, but
+		// leaves Bases' own active-cell ring (".bases-table-active-cell",
+		// a position:absolute decorative box this plugin only adds
+		// color/box-shadow to -- see styles.css) stuck at the
+		// previously-focused cell's own position, or briefly at some
+		// other wrong position of Bases' own (confirmed live: a single
+		// correction right after focusin sometimes lost a race against a
+		// LATER, separate reposition Bases itself performs afterward,
+		// re-breaking a value this code had just fixed). Keep nudging the
+		// ring to match the newly-focused cell's own real screen rect for
+		// a short window of frames after focus lands, rather than only
+		// once, so a later Bases mutation gets caught and corrected too.
+		this.registerDomEvent(document, "focusin", (e) => {
+			var target = e.target;
+			if (!(target instanceof HTMLElement)) return;
+			// Escape (and similar) moves focus to the plain container
+			// itself -- cell-selection mode, not editing a specific
+			// cell's own widget. Its own rect is the whole table's
+			// bounding box, not any one cell's, and nudging the ring
+			// toward THAT throws it to the table's own top-left corner.
+			// Only correct while a real per-cell widget has focus.
+			if (target.matches(".bases-table-container")) return;
+			if (!target.closest(".bases-table-container")) return;
+			var attemptsLeft = 15; // ~250ms at 60fps
+			var tick = () => {
+				attemptsLeft--;
+				var ring = document.querySelector(".bases-table-active-cell");
+				if (ring) {
+					var targetRect = target.getBoundingClientRect();
+					var ringRect = ring.getBoundingClientRect();
+					var deltaTop = targetRect.top - ringRect.top;
+					var deltaLeft = targetRect.left - ringRect.left;
+					if (Math.abs(deltaTop) >= 1 || Math.abs(deltaLeft) >= 1) {
+						var currentTop = parseFloat(ring.style.top) || 0;
+						var currentLeft = parseFloat(ring.style.left) || 0;
+						ring.style.top = currentTop + deltaTop + "px";
+						ring.style.left = currentLeft + deltaLeft + "px";
+					}
+				}
+				if (attemptsLeft > 0) window.requestAnimationFrame(tick);
+			};
+			window.requestAnimationFrame(tick);
+		}, true);
 	}
 
 	applyStyles() {
