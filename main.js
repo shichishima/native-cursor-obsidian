@@ -137,15 +137,27 @@ function getScrollOrigin(view) {
  */
 
 var CursorWidget = (function () {
-	function CursorWidget(className, left, top, height) {
+	function CursorWidget(className, left, top, height, win) {
 		this.className = className;
 		this.left = Math.round(left);
 		this.top = Math.round(top);
 		this.height = Math.round(height);
+		// The owning EditorView's own window (view.scrollDOM.win, same
+		// accessor makePointerDownHandler already uses above) -- a bare
+		// `requestAnimationFrame` here always resolves to the MAIN
+		// window's own rAF loop, confirmed live as the reason a popout's
+		// own body cursor stopped visually following real selection
+		// movement: Chromium throttles/pauses a background window's rAF
+		// callbacks, and the main window counts as backgrounded the
+		// moment a popout has OS focus instead -- so this never (or very
+		// rarely) got to actually paint while working in the popout, even
+		// though markers()/draw() were recomputing the right position the
+		// whole time.
+		this.win = win;
 
 		var self = this;
 		this.adjust = function (el) {
-			requestAnimationFrame(function () {
+			self.win.requestAnimationFrame(function () {
 				el.setCssStyles({
 					left: self.left + "px",
 					top: self.top + "px",
@@ -201,6 +213,7 @@ var CursorWidget = (function () {
 			coords.left - origin.left,
 			top,
 			height,
+			view.scrollDOM.win,
 		);
 	};
 
@@ -234,6 +247,7 @@ var CursorWidget = (function () {
 			coords.left - origin.left,
 			top,
 			height,
+			hostView.scrollDOM.win,
 		);
 	};
 
@@ -543,15 +557,23 @@ var MIRROR_CSS_PROPS = [
 ];
 
 class InlineTitleCaret {
-	constructor() {
+	// One instance per open window (main + each popout) -- confirmed live
+	// that a bare `document`/`window` here always resolves to the MAIN
+	// window, so a single shared instance could neither see focus events
+	// from a popout's own title field nor render a caret element into its
+	// separate DOM tree. doc/win are that popout's own, passed in by the
+	// plugin's per-window registration (see NativeCursorPlugin.onload).
+	constructor(doc, win) {
+		this.doc = doc;
+		this.win = win;
 		this.activeTitle = null;
 		this.rafId = null;
 		this.disposers = [];
 
-		this.caretEl = document.createElement("span");
+		this.caretEl = doc.createElement("span");
 		this.caretEl.className = "native-cursor-title-caret native-cursor-title-caret-hidden";
 		this.caretEl.setAttribute("aria-hidden", "true");
-		document.body.appendChild(this.caretEl);
+		doc.body.appendChild(this.caretEl);
 
 		// Lazily created on first use (most sessions never focus the
 		// property-name field at all) — a plain, off-screen div reused
@@ -566,7 +588,7 @@ class InlineTitleCaret {
 			}
 		};
 		this.onFocusOut = () => {
-			window.setTimeout(() => {
+			this.win.setTimeout(() => {
 				this.syncFromSelection();
 				this.requestRender();
 			}, 0);
@@ -577,20 +599,20 @@ class InlineTitleCaret {
 		};
 		this.requestRender = () => {
 			if (this.rafId !== null) return;
-			this.rafId = window.requestAnimationFrame(() => {
+			this.rafId = this.win.requestAnimationFrame(() => {
 				this.rafId = null;
 				this.render();
 			});
 		};
 
-		this.addListener(document, "focusin", this.onFocusIn, true);
-		this.addListener(document, "focusout", this.onFocusOut, true);
-		this.addListener(document, "selectionchange", this.onActivity);
-		this.addListener(document, "keydown", this.onActivity, true);
-		this.addListener(document, "input", this.onActivity, true);
-		this.addListener(document, "pointerdown", this.onActivity, true);
-		this.addListener(window, "resize", this.requestRender);
-		this.addListener(window, "scroll", this.requestRender, true);
+		this.addListener(doc, "focusin", this.onFocusIn, true);
+		this.addListener(doc, "focusout", this.onFocusOut, true);
+		this.addListener(doc, "selectionchange", this.onActivity);
+		this.addListener(doc, "keydown", this.onActivity, true);
+		this.addListener(doc, "input", this.onActivity, true);
+		this.addListener(doc, "pointerdown", this.onActivity, true);
+		this.addListener(win, "resize", this.requestRender);
+		this.addListener(win, "scroll", this.requestRender, true);
 
 		this.syncFromSelection();
 		this.requestRender();
@@ -632,13 +654,13 @@ class InlineTitleCaret {
 		// (a focused contenteditable is ALSO its own document.activeElement,
 		// so this is a strict superset of the old Selection-only check,
 		// not a separate special case).
-		var active = document.activeElement;
+		var active = this.doc.activeElement;
 		var activeTitle = this.getTitleFromTarget(active);
 		if (activeTitle) {
 			this.setActiveTitle(activeTitle);
 			return;
 		}
-		var sel = window.getSelection();
+		var sel = this.win.getSelection();
 		if (!sel || sel.rangeCount === 0) {
 			this.setActiveTitle(null);
 			return;
@@ -690,7 +712,7 @@ class InlineTitleCaret {
 		// title element's own computed line-height the same way, falling
 		// back to the raw glyph rect if line-height can't be read as a
 		// pixel value (e.g. "normal").
-		var lineHeight = parseFloat(getComputedStyle(this.activeTitle).lineHeight);
+		var lineHeight = parseFloat(this.win.getComputedStyle(this.activeTitle).lineHeight);
 		var top = rect.top;
 		var height = rect.height;
 		if (isFinite(lineHeight) && lineHeight > 0) {
@@ -709,13 +731,13 @@ class InlineTitleCaret {
 	}
 
 	getContentEditableCaretRect(title) {
-		var sel = window.getSelection();
+		var sel = this.win.getSelection();
 		if (!sel || sel.rangeCount === 0) return null;
 		var focusNode = sel.focusNode;
 		if (!focusNode || !title.contains(focusNode)) return null;
 		var range;
 		try {
-			range = document.createRange();
+			range = this.doc.createRange();
 			range.setStart(focusNode, sel.focusOffset);
 			range.collapse(true);
 		} catch (e) {
@@ -737,7 +759,7 @@ class InlineTitleCaret {
 	// directly the way getContentEditableCaretRect does.
 	getInputCaretRect(input) {
 		if (!this.mirrorEl) {
-			this.mirrorEl = document.createElement("div");
+			this.mirrorEl = this.doc.createElement("div");
 			// Absolutely positioned off-screen rather than
 			// visibility:hidden/display:none -- both of those can make
 			// some browsers skip layout for the element entirely, which
@@ -749,9 +771,9 @@ class InlineTitleCaret {
 			this.mirrorEl.style.left = "-9999px";
 			this.mirrorEl.style.whiteSpace = "pre";
 			this.mirrorEl.setAttribute("aria-hidden", "true");
-			document.body.appendChild(this.mirrorEl);
+			this.doc.body.appendChild(this.mirrorEl);
 		}
-		var cs = getComputedStyle(input);
+		var cs = this.win.getComputedStyle(input);
 		for (var i = 0; i < MIRROR_CSS_PROPS.length; i++) {
 			var prop = MIRROR_CSS_PROPS[i];
 			this.mirrorEl.style[prop] = cs[prop];
@@ -827,21 +849,45 @@ class NativeCursorPlugin extends obsidian.Plugin {
 		this.alreadyPatched = false;
 		this.tryPatchRef = null;
 		this.cursorPlugin = null;
-		this.styleEl = null;
+		this.styleEls = [];
+		this.titleCarets = [];
 	}
 
 	async onload() {
 		await this.loadSettings();
 		this.alreadyPatched = false;
 
-		this.styleEl = document.createElement("style");
-		this.styleEl.id = "native-cursor-styles";
-		document.head.appendChild(this.styleEl);
-		this.applyStyles();
-
 		this.addSettingTab(new CursorSettingTab(this.app, this));
 		this.registerEditorExtension(tableCellViewPlugin);
-		this.titleCaret = new InlineTitleCaret();
+
+		// One <style> element, one InlineTitleCaret, and the two focusin
+		// workarounds below -- each registered per open window (main now,
+		// each popout as it opens via 'window-open') rather than once
+		// against the bare `document`/`window` globals, which only ever
+		// resolve to the main window's own objects. Confirmed live as the
+		// cause of three separate popout symptoms: the title/Properties
+		// caret not appearing at all, cursor width/color settings not
+		// applying, and the body-text cursor going stale/invisible after
+		// a focus change inside the popout. Matches
+		// obsidian-universal-cursor-hotkeys' own established pattern for
+		// this (registerWindowDomListeners there). No 'window-close'
+		// handling for the focusin workarounds (registerDomEvent's own
+		// cleanup is tied to this plugin's lifecycle, not the window's --
+		// a closed window's own listeners simply stop firing); styleEls
+		// and titleCarets DO get torn down on 'window-close', just to
+		// avoid piling up dead entries across repeated popout open/close.
+		this.registerStyleWindow(window);
+		this.registerTitleCaretWindow(window);
+		this.registerFocusWorkarounds(document, window);
+		this.registerEvent(this.app.workspace.on("window-open", (_, win) => {
+			this.registerStyleWindow(win);
+			this.registerTitleCaretWindow(win);
+			this.registerFocusWorkarounds(win.document, win);
+		}));
+		this.registerEvent(this.app.workspace.on("window-close", (_, win) => {
+			this.unregisterStyleWindow(win);
+			this.unregisterTitleCaretWindow(win);
+		}));
 
 		var activeEditor =
 			this.app.workspace.activeEditor && this.app.workspace.activeEditor.editor;
@@ -853,7 +899,18 @@ class NativeCursorPlugin extends obsidian.Plugin {
 				this.tryPatch.bind(this),
 			);
 		}
+	}
 
+	// Both of these were previously wired straight to the bare `document`
+	// global at onload, which only ever covers the main window -- same
+	// class of bug as InlineTitleCaret's own (see its constructor comment
+	// and registerTitleCaretWindow below), confirmed live as the cause of
+	// the body-text cursor going stale/invisible specifically after
+	// moving focus around inside a popout: this gate never ran there, so
+	// layerUpdate's own stale-position gap (explained below) was never
+	// patched over for that window's editors. doc/win are that window's
+	// own, same as InlineTitleCaret.
+	registerFocusWorkarounds(doc, win) {
 		// Force a fresh cursor-layer redraw whenever a CM6 editor's own
 		// contentDOM gains real DOM focus. layerUpdate's own gating
 		// (view.hasFocus || isOverTable) only redraws in response to a
@@ -874,7 +931,7 @@ class NativeCursorPlugin extends obsidian.Plugin {
 		// calls markers() (and this plugin's own patched version of it)
 		// fresh, using the NOW-correct coordsAtPos-based position -
 		// independent of whatever layerUpdate decided earlier.
-		this.registerDomEvent(document, "focusin", (e) => {
+		this.registerDomEvent(doc, "focusin", (e) => {
 			var target = e.target;
 			var cmContent = target && target.closest && target.closest(".cm-content");
 			if (!cmContent) return;
@@ -903,7 +960,7 @@ class NativeCursorPlugin extends obsidian.Plugin {
 		// ring to match the newly-focused cell's own real screen rect for
 		// a short window of frames after focus lands, rather than only
 		// once, so a later Bases mutation gets caught and corrected too.
-		this.registerDomEvent(document, "focusin", (e) => {
+		this.registerDomEvent(doc, "focusin", (e) => {
 			var target = e.target;
 			if (!(target instanceof HTMLElement)) return;
 			if (!target.closest(".bases-table-container")) return;
@@ -932,7 +989,7 @@ class NativeCursorPlugin extends obsidian.Plugin {
 			var attemptsLeft = 15; // ~250ms at 60fps
 			var tick = () => {
 				attemptsLeft--;
-				var ring = document.querySelector(".bases-table-active-cell");
+				var ring = doc.querySelector(".bases-table-active-cell");
 				if (ring) {
 					var targetRect = positionRef.getBoundingClientRect();
 					var ringRect = ring.getBoundingClientRect();
@@ -945,16 +1002,16 @@ class NativeCursorPlugin extends obsidian.Plugin {
 						ring.style.left = currentLeft + deltaLeft + "px";
 					}
 				}
-				if (attemptsLeft > 0) window.requestAnimationFrame(tick);
+				if (attemptsLeft > 0) win.requestAnimationFrame(tick);
 			};
-			window.requestAnimationFrame(tick);
+			win.requestAnimationFrame(tick);
 		}, true);
 	}
 
 	applyStyles() {
 		var s = this.settings;
 		// Only dynamic, user-controlled values live here, all structural CSS in styles.css
-		this.styleEl.textContent = [
+		var css = [
 			":root {",
 			"  --cursor-width: " + s.cursorWidth + "px;",
 			"  --cursor-color-dark: " + s.cursorColorDark + ";",
@@ -962,6 +1019,26 @@ class NativeCursorPlugin extends obsidian.Plugin {
 			"  --cursor-blink-name: " + (s.blink ? "cm-cursor-blink" : "none") + ";",
 			"}",
 		].join("\n");
+		for (var i = 0; i < this.styleEls.length; i++) {
+			this.styleEls[i].el.textContent = css;
+		}
+	}
+
+	registerStyleWindow(win) {
+		var el = win.document.createElement("style");
+		el.id = "native-cursor-styles";
+		win.document.head.appendChild(el);
+		this.styleEls.push({ win: win, el: el });
+		this.applyStyles();
+	}
+
+	unregisterStyleWindow(win) {
+		for (var i = this.styleEls.length - 1; i >= 0; i--) {
+			if (this.styleEls[i].win === win) {
+				this.styleEls[i].el.remove();
+				this.styleEls.splice(i, 1);
+			}
+		}
 	}
 
 	tryPatch(editor) {
@@ -986,13 +1063,25 @@ class NativeCursorPlugin extends obsidian.Plugin {
 		}
 	}
 
+	registerTitleCaretWindow(win) {
+		this.titleCarets.push(new InlineTitleCaret(win.document, win));
+	}
+
+	unregisterTitleCaretWindow(win) {
+		for (var i = this.titleCarets.length - 1; i >= 0; i--) {
+			if (this.titleCarets[i].win === win) {
+				this.titleCarets[i].destroy();
+				this.titleCarets.splice(i, 1);
+			}
+		}
+	}
+
 	onunload() {
 		this.cancelPatchAttempt();
-		if (this.styleEl) this.styleEl.remove();
-		if (this.titleCaret) {
-			this.titleCaret.destroy();
-			this.titleCaret = null;
-		}
+		for (var i = 0; i < this.styleEls.length; i++) this.styleEls[i].el.remove();
+		this.styleEls = [];
+		for (var i = 0; i < this.titleCarets.length; i++) this.titleCarets[i].destroy();
+		this.titleCarets = [];
 	}
 
 	async loadSettings() {
